@@ -812,12 +812,12 @@ const startAgents = async () => {
     }
 
     // Find available port
-    while (!(await checkPortAvailable(serverPort))) {
-        elizaLogger.warn(
-            `Port ${serverPort} is in use, trying ${serverPort + 1}`
-        );
-        serverPort++;
-    }
+    // while (!(await checkPortAvailable(serverPort))) {
+    //     elizaLogger.warn(
+    //         `Port ${serverPort} is in use, trying ${serverPort + 1}`
+    //     );
+    //     serverPort++;
+    // }
 
     // upload some agent functionality into directClient
     // This is used in client-direct/api.ts at "/agents/:agentId/set" route to restart an agent

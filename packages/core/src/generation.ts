@@ -1320,7 +1320,7 @@ export async function generateText({
                     response = secretAiResponse;
                 }
                 break;
-  
+
             case ModelProviderName.BEDROCK: {
                 elizaLogger.debug("Initializing Bedrock model.");
 
@@ -1443,13 +1443,29 @@ export async function splitChunks(
 }
 
 export function splitText(content: string, chunkSize: number, bleed: number): string[] {
+    // Input validation
+    if (!content || typeof content !== 'string') {
+        return [];
+    }
+
+    // Ensure reasonable parameters
+    chunkSize = Math.max(1, chunkSize || 1000);
+    bleed = Math.min(chunkSize - 1, Math.max(0, bleed || 0));
+
     const chunks: string[] = [];
     let start = 0;
 
     while (start < content.length) {
         const end = Math.min(start + chunkSize, content.length);
         chunks.push(content.substring(start, end));
-        start = end - bleed; // Apply overlap
+
+        // Calculate next start position with overlap
+        start = end - bleed;
+
+        // Ensure we always make forward progress
+        if (start >= end || start === (end - bleed)) {
+            start = Math.min(end + 1, content.length);
+        }
     }
 
     return chunks;

@@ -1,4 +1,5 @@
-import { readFile } from "fs/promises";
+import * as pdfjsLib from 'pdfjs-dist';
+import { readFile } from 'fs/promises';
 import { join } from "path";
 import { names, uniqueNamesGenerator } from "unique-names-generator";
 import { v4 as uuidv4 } from "uuid";
@@ -365,10 +366,10 @@ export class AgentRuntime implements IAgentRuntime {
 
         this.imageModelProvider =
             this.character.imageModelProvider ?? this.modelProvider;
-        
+
         this.imageVisionModelProvider =
             this.character.imageVisionModelProvider ?? this.modelProvider;
-            
+
         elizaLogger.info(
           `${this.character.name}(${this.agentId}) - Selected model provider:`,
           this.modelProvider
@@ -440,6 +441,7 @@ export class AgentRuntime implements IAgentRuntime {
         });
 
         // this.verifiableInferenceAdapter = opts.verifiableInferenceAdapter;
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdfjs-dist/build/pdf.worker.mjs';
     }
 
     private async initializeDatabase() {
@@ -504,6 +506,9 @@ export class AgentRuntime implements IAgentRuntime {
                     this.character.knowledge.reduce(
                         (acc, item) => {
                             if (typeof item === "object") {
+                                elizaLogger.debug(
+                                    `[RAG Filter] Found object item: ${JSON.stringify(item)}`,
+                                );
                                 if (isDirectoryItem(item)) {
                                     elizaLogger.debug(
                                         `[RAG Filter] Found directory item: ${JSON.stringify(item)}`,
@@ -640,6 +645,13 @@ export class AgentRuntime implements IAgentRuntime {
     private async processCharacterRAGKnowledge(
         items: (string | { path: string; shared?: boolean })[],
     ) {
+        // Import these at the top of your file:
+        // import * as pdfjsLib from 'pdfjs-dist';
+        // import { readFile } from 'fs/promises';
+
+        // Initialize PDF.js worker (add this in your class constructor or initialization method)
+        // pdfjsLib.GlobalWorkerOptions.workerSrc = '../../node_modules/pdfjs-dist/build/pdf.worker.mjs';
+
         let hasError = false;
 
         for (const item of items) {
@@ -658,7 +670,6 @@ export class AgentRuntime implements IAgentRuntime {
                     contentItem = item;
                 }
 
-                // const knowledgeId = stringToUuid(contentItem);
                 const knowledgeId = this.ragKnowledgeManager.generateScopedId(
                     contentItem,
                     isShared,
@@ -701,12 +712,12 @@ export class AgentRuntime implements IAgentRuntime {
                             knowledgeCount: existingKnowledge.length,
                             firstResult: existingKnowledge[0]
                                 ? {
-                                      id: existingKnowledge[0].id,
-                                      agentId: existingKnowledge[0].agentId,
-                                      contentLength:
-                                          existingKnowledge[0].content.text
-                                              .length,
-                                  }
+                                    id: existingKnowledge[0].id,
+                                    agentId: existingKnowledge[0].agentId,
+                                    contentLength:
+                                    existingKnowledge[0].content.text
+                                        .length,
+                                }
                                 : null,
                             results: existingKnowledge.map((k) => ({
                                 id: k.id,
@@ -715,12 +726,55 @@ export class AgentRuntime implements IAgentRuntime {
                             })),
                         });
 
-                        // Read file content
-                        const content: string = await readFile(
-                            filePath,
-                            "utf8",
-                        );
-                        if (!content) {
+                        // Read file content - handle different file types appropriately
+                        let content: string;
+
+                        if (fileExtension === 'pdf') {
+                            // For PDF files, use PDF.js
+                            try {
+                                // Read file as buffer
+                                const pdfBuffer = await readFile(filePath);
+
+                                // Convert Buffer to Uint8Array explicitly
+                                const uint8Array = new Uint8Array(pdfBuffer);
+
+                                // Load the PDF document
+                                const pdfDocument = await pdfjsLib.getDocument({
+                                    data: uint8Array,
+                                    useSystemFonts: true, // Can help with font rendering
+                                }).promise;
+
+                                // Extract text from all pages
+                                let extractedText = '';
+                                for (let i = 1; i <= pdfDocument.numPages; i++) {
+                                    const page = await pdfDocument.getPage(i);
+                                    const textContent = await page.getTextContent();
+                                    const pageText = textContent.items
+                                        .map(item => 'str' in item ? item.str : '')
+                                        .join(' ');
+
+                                    extractedText += pageText + '\n\n';
+                                }
+
+                                content = extractedText.trim();
+
+                                elizaLogger.info(
+                                    `Successfully extracted ${content.length} characters from PDF: ${contentItem} (${pdfDocument.numPages} pages)`
+                                );
+                            } catch (pdfError: any) {
+                                elizaLogger.error(
+                                    `PDF parsing error for ${contentItem}: ${pdfError?.message || pdfError || 'Unknown PDF error'}`
+                                );
+                                hasError = true;
+                                continue;
+                            }
+                        } else {
+                            // For text-based files (md, txt), read as UTF-8
+                            content = await readFile(filePath, "utf8");
+                        }
+
+                        if (!content || content.trim().length === 0) {
+                            elizaLogger.error(`Empty or invalid content for file: ${contentItem}`);
                             hasError = true;
                             continue;
                         }
@@ -1796,12 +1850,12 @@ const formatKnowledge = (knowledge: KnowledgeItem[]) => {
     return knowledge.map(item => {
         // Get the main content text
         const text = item.content.text;
-        
+
         // Clean up formatting but maintain natural text flow
         const cleanedText = text
             .trim()
             .replace(/\n{3,}/g, '\n\n'); // Replace excessive newlines
-            
+
         return cleanedText;
     }).join('\n\n'); // Separate distinct pieces with double newlines
 };
